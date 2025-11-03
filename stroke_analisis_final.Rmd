@@ -110,6 +110,8 @@ ACV$stroke = factor(ACV$stroke,
                     labels = c("No", "Yes"))
 
 str(ACV)
+
+ACV$id <- NULL
 ```
 
 Creo una tabla interactiva de los datos que permita realizar búsquedas.
@@ -236,8 +238,6 @@ ACV_imp %>%
   group_by(stroke, gender) %>%
   summarise(n=n()) %>%
   mutate(perc=round(100*n/sum(n), 1))
-
-#---------------------------------------
 
 ```
 
