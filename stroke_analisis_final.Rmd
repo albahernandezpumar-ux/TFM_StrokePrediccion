@@ -1,0 +1,1061 @@
+---
+title: "Stroke_analisis_Final"
+author: "Alba Hernández Pumar"
+date: "2025-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning= FALSE, message=FALSE, comment=NA)
+```
+
+Cargo las librerías que voy a utilizar.
+
+```{r}
+library(agricolae)
+library(car)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(kableExtra)
+library(latexpdf)
+library(modeest)
+library(plotly)
+library(plyr)
+library(prettyR)
+library(stats)
+library(tidyverse)
+library(webshot)
+library(dplyr)
+library(purrr)
+library(flextable)
+library(psych)
+library(ggthemes)
+library(corrplot)
+library(GGally)
+library(survival)
+library(MASS)
+library(reshape2)
+library(DT)
+library(skimr)
+library(vcd)
+library(htmltools)
+library(htmlwidgets)
+library(tidymodels)
+library(ROCR)
+library(caret)
+library(randomForest)
+library(ConfusionTableR)
+library(pROC)
+library(openxlsx)
+library(probably)
+library(DataExplorer)
+library(ModelMetrics)
+library(stringr)
+library(univariateML)
+library(vip)
+library(WRS2)
+library(shiny)
+library(recipes)
+library(glmnet)
+library(themis) # para SMOTE
+library(stringr)
+```
+
+El dataset que voy a utilizar es *stroke.csv*, el cual contiene datos sobre pacientes que han sufrido un accidente cerebrovascular (ACV), que están asociado a una serie de variables que son:
+
+1. ID: Id of the patient
+2. Gender: M (male), F (female)
+3. Age: Age of the patient
+4. Hypertension: 0 (no presenta), 1 (presenta)
+5. Heart_disease: 0, 1 (ha tenido)
+6. Ever_married: Yes, No
+7. Work_type: Private, Self-employed, Govt_job, Children
+8. Residen_type: Urban, Rural
+9. Avg_glucose_level: glucose level of the patient
+10. BMI: BMI of the patient
+11. Smoking_status: Formerly smoked, Never smoked, Smokes
+12. Stroke: Yes, No
+
+```{r}
+# Cargo el dataset y lo convierto en un dataframe
+
+ACV = readr::read_csv("stroke.csv",na = c("", "NA", "Unknown", "unknown", "N/A"))
+ACV = data.frame(ACV)
+
+str(ACV)
+```
+
+Se observa que la base de datos contiene las 12 variables en un total de 5110 pacientes. Establezco la categoría correcta de cada variable (factor/numérica), añado las etiquetas correspondientes a la leyenda facilitada y homogenizo los nombres de las variables.
+
+```{r}
+names(ACV) = c("id", "gender", "age", "hypertension", "heart_disease", "ever_married", "work_type", "residence_type", "avg_glucose_level", "bmi", "smoking_status", "stroke")
+
+category_cols = c("gender", "hypertension", "heart_disease", "ever_married", "work_type", "residence_type", "smoking_status")
+
+for(col in category_cols){
+  ACV[[col]] = as.factor(ACV[[col]])
+}
+
+ACV$hypertension = factor(ACV$hypertension,
+                    levels = c(0, 1),
+                    labels = c("No", "Yes"))
+
+ACV$heart_disease = factor(ACV$heart_disease,
+                    levels = c(0, 1),
+                    labels = c("No", "Yes"))
+
+ACV$stroke = factor(ACV$stroke,
+                    levels = c(0, 1),
+                    labels = c("No", "Yes"))
+
+str(ACV)
+```
+
+Creo una tabla interactiva de los datos que permita realizar búsquedas.
+
+```{r}
+# Creación de la tabla interactiva
+
+ACV = ACV %>%
+  mutate(
+    stroke= as.factor(dplyr::recode(stroke, `No`="No", `Yes`="Yes")),
+    gender= as.factor(dplyr::recode(gender,`Male`="Hombre", `Female`="Mujer", `Other`="Otro")
+  ))%>%
+  
+relocate(stroke, .before=gender)
+
+DT::datatable(ACV,
+              rownames= T,
+              options=list(pageLength=10, scrolt1x= T),
+              class="white-space: nowrap")
+```
+
+Determino si alguna de las variables factor tiene algún dato que le falte (n_missing) y obtener las frecuencias para cada una de las opciones de cada variable.
+
+```{r}
+# Análisis descriptivo de variables factores
+
+DN <- skim(ACV)%>%
+  yank("factor") #Extrae solo las variables factoriales del resumen generado por "skim()"
+ 
+# Crear una tabla visual con formato mejorado para mostrar la estadística descriptiva de las variables factor
+
+DN %>%
+  kable() %>% #Convierte la tabla en formato HTML o LaTeX para visualización
+  add_header_above(c("Descriptiva de las variables factor"=6),
+                   color="black", bold=T, font_size=18) %>% #Agrega un encabezado superior
+  kable_styling("striped", #Aplica un estilo de rayas para mejor lectura
+                full_width=F, #Limita el ancho de la tabla al contenido
+                position="center", #Centra la tabla en el documento
+                font_size=16) %>%
+  column_spec(1, bold=T) %>% #Hace que la primera columna sea negrita
+  row_spec(0, bold=T, color="orange") #Resalta la primera fila en color naranja y en negrita
+```
+
+Realizo lo mismo para las variables numéricas (destacando la media y los percentiles) y compruebo si hay algún dato que falte (n_missing).
+
+```{r}
+# Análisis descriptivo de variables numéricas
+
+DN1= skim(ACV)%>%
+  yank("numeric")%>% #Extrae solo las variables numérico del resumen generado por "skim()"
+  mutate(
+    mean=round(mean,2), #Redondea la media a 2 decimales
+    sd=round(sd,2) #Redondea la desviación estándar a 2 decimales
+  )
+
+# Crear una tabla visual con formato mejorado para mostrar la estadística descriptiva de las variables numérico
+
+DN1 %>%
+  kable() %>% #Convierte la tabla en formato HTML o LaTeX para visualización
+  add_header_above(c("Descriptiva de las variables numéricas"=11),
+                   color="black", bold=T, font_size=18) %>% #Agrega un encabezado superior
+  kable_styling("striped", #Aplica un estilo de rayas para mejor lectura
+                full_width=F, #Limita el ancho de la tabla al contenido
+                position="center", #Centra la tabla en el documento
+                font_size=16) %>%
+  column_spec(1, bold=T) %>% #Hace que la primera columna sea negrita
+  row_spec(0, bold=T, color="orange") #Resalta la primera fila en color naranja y en negrita
+```
+
+Como se puede observar hay valores faltantes en smoking_status y en bmi, por lo tanto realizo una imputación para estas variables, donde los valores faltantes se imputara por mediana y moda.
+
+```{r}
+# Imputación para las variables con valores faltantes (smoking_status y bmi)
+
+simple_impute <- function(d){
+  d2 <- d
+  # Imputar númericos por mediana
+  for (c in names (d2)){
+    if (is.numeric(d2[[c]])){
+      med <- median(d2[[c]], na.rm = T)
+      d2[[c]][is.na(d2[[c]])] <- med
+    }
+  }
+  # Imputar factores por la moda
+  for (c in names(d2)) {
+    if (is.factor(d2[[c]])|| is.character(d2[[c]])) {
+      v <- na.omit(d2[[c]])
+      if (length(v) > 0){
+        modev <- names(sort(table(v), decreasing = T))[1]
+        d2[[c]][is.na(d2[[c]])] <- modev
+      }
+      d2[[c]] <- as.factor(d2[[c]])
+    }
+  }
+  return(d2)
+}
+
+ACV_imp <- simple_impute(ACV)
+
+# Compruebo que no hay NAs  
+  
+sapply(ACV_imp, function(x) sum(is.na(x)))
+```
+
+Con la base de datos preparada, procedo a realizar los análisis y gráficos pertinentes.
+
+```{r}
+# ------------------------------------ Estadísticos descriptivos Frecuencias y porcentajes
+# Género
+table(ACV_imp$gender)
+prop.table(table(ACV_imp$gender)) * 100
+
+# Hipertensión
+prop.table(table(ACV_imp$hypertension)) * 100
+
+# Enfermedad cardíaca
+prop.table(table(ACV_imp$heart_disease)) * 100
+
+# Tabaquismo
+prop.table(table(ACV_imp$smoking_status)) * 100
+
+# Resumen descriptivo
+ACV_imp %>%
+  group_by(stroke, gender) %>%
+  summarise(n=n()) %>%
+  mutate(perc=round(100*n/sum(n), 1))
+
+#---------------------------------------
+
+```
+
+
+Realizo los gráficos de las distintas variables relacionándolas con si los pacientes han sufrido accidente cerebrovascular o no. Para comparar variables factoriales realizo histogramas y para comparar variables numéricas utilizo los boxplot.
+
+Se presenta los histogramas de manera general:
+
+```{r}
+# Transformo el dataset para su visualización con ggplot2
+
+Hl= melt(ACV_imp,
+         id.var="stroke", #variable fija para comparación
+         measure.vars = c("gender", "hypertension", "heart_disease", "ever_married", "work_type", "residence_type", "smoking_status"))
+
+#"melt()" convierte el dataframe de formato ancho a largo para facilitar el trazado de gráficos con ggplot2.
+# La variable "stroke" se mantiene fija, y las demás se transforman en una estructura de "variable-valor".
+
+# Creo un gráfico de barras con ggplot2
+
+p=ggplot(Hl, aes(x=value, fill=stroke))+
+  geom_bar(position="dodge", color="grey")+ #Genera un gráfico de barras con agrupación por diagnóstico
+  facet_wrap(~variable, nrow=4, scales="free_x")+ #Divide el gráfico en subgráficos según cada variable categórica
+  labs(title="Distribución de las variables factoriales \n en función del diagnóstico de accidente cerebrovascular",
+       x="Variable", #Etiqueta del eje X
+       y="Frecuencia", #Etiqueta del eje y
+       fill="Diagnóstico accidente cerebrovascular")+ #Leyenda del gráfico
+  scale_fill_manual(values=c("No"="yellow", "Yes"="green"))+ #Definir colores manualmente
+  theme_grey()+ #Aplicar tema gris por defecto
+  theme(
+    panel.spacing=unit(1,"lines"), #Ajustar el espacio entre paneles en el facetado
+    axis.text.x = element_text(angle=0, hjust=1), #Ajuste del texto en el eje X
+    strip.text = element_text(size=10), #Tamaño del texto en los paneles
+    axis.title.y = element_text(size=14), #Tamaño del título del eje Y
+    axis.title.x = element_text(size=14), #Tamaño del título del eje X
+    plot.title = element_text(size=20, hjust=0.5) #Tamaño y alineación del título general del gráfico
+  )
+
+# Convierto el gráfico a una versión interactiva con plotly
+
+p_interactive= ggplotly(p, height=900, width=1200)
+
+# "ggplotly()" convierte un gráfico estático de ggplot en uno interactivo con zoom y tooltip.
+
+# Ajuste del diseño del gráfico interactivo
+
+p_interactive=p_interactive %>% layout(
+  hoverlabel=list(bgcolor="black", #Color del fondo del tooltip
+                  font=list(color="white") #Color del texto en el tooltip
+                  ),
+  margin=list(l=100, r=50, b=100, t=150), #Ajustar los márgenes del gráfico
+  xaxis=list(tickangle=0), #Mantener etiquetas horizontales en el eje X
+  yaxis=list(automargin=T) #Ajuste automático del margen en el eje Y
+  )
+
+# Mostrar el gráfico interactivo
+
+p_interactive
+```
+
+Se representa en un boxplot las variables numéricas indicando la media (rojo) y la mediana (azul):
+
+```{r}        
+# Transformación del dataset para la visualización con ggplot2    
+
+Bl=melt(ACV_imp,
+        id.var="stroke", #Mantener la variable stroke como identificador
+        measure.vars=c("age", "avg_glucose_level", "bmi")) #Seleccionar las variables numéricas para convertir el dataframe a formato largo
+
+# Creo un boxplot para comparar la distribución de las variables numéricas en función del diagnóstico de accidente cerebrovascular
+
+p=ggplot(Bl, aes(x=stroke, y=value, fill= stroke))+
+  geom_boxplot(position= "dodge", width = 0.8)+ #Crear un boxplot con relleno basado en la variable stroke
+  facet_wrap(~variable, ncol= 1, scales = "free_y") +
+  stat_summary(fun=median, geom="crossbar", width=0.75, color="blue", size=0.5)+ #Línea azul en la mediana
+  stat_summary(fun=mean, geom="crossbar", width=0.75, color="red", size=0.5)+ #Línea roja en la media
+  scale_fill_manual(values=c("No"="yellow", "Yes"="green"))+ #Colores personalizados para cada categoría
+  theme_grey()+ #Aplicar el tema gris predeterminado
+  theme(
+    panel.spacing=unit(1, "lines"), #Ajustar el espacio entre paneles
+    axis.text.x = element_text(angle=0, vjust=0.5), #Ajuste del texto en el eje X
+    strip.text = element_text(size=10), #Tamaño del texto en los paneles
+    axis.title.y = element_text(size=14), #Tamaño del título del eje Y
+    axis.title.x = element_text(size=14), #Tamaño del título del eje X
+    plot.title = element_text(size=16, hjust=0.5) #Tamaño y alineación del título general del gráfico
+  )+
+  labs(title="Boxplot de las variables numéricas en función \n del diagnóstico de accidente cerebrovascular", #Título del gráfico
+       x="Variable", #Etiqueta del eje X
+       y="Valor", #Etiqueta del eje Y
+       fill="Diagnóstivo accidente cerebrovascular") #Etiqueta de la leyenda
+
+# Convierto el gráfico a una versión interactiva con plotly
+
+p_interactive= ggplotly(p, height=900, width=1200)
+
+# Ajuste del diseño del gráfico interactivo
+
+p_interactive=p_interactive %>% layout(
+  hoverlabel=list(
+    bgcolor="black", #Color del fondo del tooltip
+    font=list(color="white") #Color del texto en el tooltip
+  ),
+  margin=list(l=100, r=50, b=100, t=150), #Ajustar los márgenes del gráfico
+  xaxis=list(tickangle=0), #Mantener etiquetas horizontales en el eje X
+  yaxis=list(automargin=T) #Ajuste automático del margen en el eje Y
+)
+
+# Mostrar el gráfico interactivo
+
+p_interactive
+```
+
+
+Hay que realizar un test estadístico, como el test de chi-cuadrado, para determinar si las diferencias que se observa en el histograma son significativas.
+
+En relación al boxplot, se puede observar la presencia de outliers en avg_glucose_level y bmi y se puede realizar un test no paramétrico para ver si las diferencias que se observan en cada una de las variables con los pacientes que han tenido un accidente cerebrovascular o no es significativa.
+
+Realizo tablas de frecuencia
+
+```{r}
+
+# Estadísticos descriptivos globales
+ACV_imp %>%
+  summarise(
+    n= n(),
+    edad_media= mean(age, na.rm= T),
+    edad_de= sd(age, na.rm= T),
+    glucosa_media= mean(avg_glucose_level, na.rm= T),
+    glucosa_de= sd(avg_glucose_level, na.rm= T),
+    bmi_media= mean(bmi, na.rm= T),
+    bmi_de= sd(bmi, na.rm= T)
+  )
+
+# Resumen descriptivo
+ACV_imp %>%
+  group_by(stroke) %>%
+  summarise(
+    n = n(),
+    edad_media = mean(age, na.rm = T),
+    glucosa_media = mean(avg_glucose_level, na.rm = T),
+    bmi_medio = mean(bmi, na.rm = T)
+  )
+```
+
+**Realizar una comparación estadística de los individuos con/ sin accidente cerebrovascular**
+
+Primero voy a realizar la comparación estadística de las variables categóricas.
+
+```{r}
+# Comparación estadística de las variables categóricas
+
+ACV_f = ACV_imp[, c(1,2,4:8,11)]
+
+DT::datatable(ACV_f,
+              rownames = T,
+              options = list(pageLength =10, scrolt1x =1), class = "white-space:nowrap")
+```
+
+Compruebo si hay variables que pueden covariar entre ellas mediante el coeficiente de Cramér generando una matriz que me indica la variable como correlaciona.
+
+```{r}
+# Creo una matriz vacía para almacenar los coeficientes correlación de Cramér
+
+m<-matrix(ncol=length(ACV_f), #Número de columnas igual al número de variables en lF
+         nrow=length(ACV_f), #Número de filas igual al número de variables en lF
+         dimnames=list(names(ACV_f), names(ACV_f))) #Asignar nombres de filas y columnas con los nombres de las variables
+
+# Definir una función para calcular el coeficiente de Cramér entre todas las variables categóricas
+
+cramer<-function(m, ACV_f){
+  for(r in seq(nrow(m))){ #Itera sobre las filas de la matriz
+    for(c in seq(ncol(m))){ #Itera sobre las columnas de la matriz
+      m[[r,c]]=assocstats(table(ACV_f[[r]], ACV_f[[c]]))$cramer 
+      #Crea una tabla de contingencia entre dos variables y extrae el coeficiente de Cramér
+    }
+  }
+  return(m) #Devolver la matriz con los coeficientes de Cramér
+}
+
+# Aplicar la función para calcular la matriz de correlación
+
+cor=cramer(m, ACV_f)
+
+#Redondear los valores de la matriz a 3 decimales
+
+cor_r=round(cor, 3)
+
+# Convertir la matriz en un dataframe y resaltar valores mayores a 0.3 en negrita
+
+cor_m=cor_r %>%
+  as.data.frame() %>%
+  mutate_all(~ifelse(.>0.3,
+                     cell_spec(.,"html", bold=T),
+                     .))
+
+# Muestro la matriz de correlación en un formato HTML interactivo
+
+cor_m %>%
+  kable(escape=F, format="html") %>%
+  add_header_above(c("Matriz de correlación de variables factor"=9),
+                   color="black", bold=T, font_size=18) %>%
+  kable_styling("striped",
+                full_width=F,
+                position="center",
+                font_size=16) %>%
+  column_spec(1, bold=T) %>%
+  row_spec(0, bold=T, color="orange")
+```
+
+Las variables con mayor correlación seria work_type con ever_married.
+
+Voy a establecer el coeficiente de Cramér entre stroke y el resto de variables. También voy a realizar un test de chi-cuadrado para establecer si las diferencias entre stroke y el resto de variable son significativamente diferentes o no y por tanto determinar si hay asociación o no.
+
+```{r}
+# Creo una matriz vacía para almacenar los resultados del test de Chi-cuadrado y coeficiente de Cramér
+
+m=matrix(nrow=7, #8 filas correspondientes a las variables categóricas analizadas
+         ncol=2,#2 columnas: una para el p-valor del test de Chi-cuadrado y otra para el coeficiente de Cramér
+         dimnames=list(colnames(ACV_f[,c(2:8)]), #Nombres de filas: variables analizadas (excluyendo la respuesta)
+                       c("p_valor", "Coeficiente_v_de_Cramér"))) #Nombres de columnas
+
+# Itera sobre las variables categóricas seleccionadas (excluyendo la respuesta)
+
+for (i in c(2:8)){
+  tabla =table(ACV_f$stroke, ACV_f[[i]]) #Crea tabla de contingencia entre "stroke" y la variable i
+  test= chisq.test(tabla) #Aplicar test de Chi-cuadrado a la tabla
+  
+  # Definir función para calcular el coeficiente de Cramér
+  
+  cramer=function(x){
+    unname(sqrt(chisq.test(x)$statistic / (sum(x)*(min(dim(x))-1))))
+  }
+  
+  # Guarda los valores en la matriz:
+  # - p-valor del test de Chi-cuadrado
+  # - coeficiente de Cramér (medida de asociación entre variables categóricas)
+  
+  m[colnames(ACV_f)[i],]=c(round(test$p.value,4),
+                           round(cramer(tabla),4))
+}
+
+# Convierto la matriz en un dataframe y resaltar valores significativos
+
+m= as.data.frame(m) %>%
+  mutate(p_valor=ifelse(as.numeric(p_valor)<0.05,
+                        cell_spec(p_valor,"html", bold=T), #Resaltar p-valor <0.05 en negrita
+                        p_valor),
+         Coeficiente_v_de_Cramér=ifelse(as.numeric(Coeficiente_v_de_Cramér)>0.3,
+                                        cell_spec(Coeficiente_v_de_Cramér, "html", bold=T), #Resalta coeficientes >0.3 en negrita
+                                        Coeficiente_v_de_Cramér)
+  )
+
+# Crear tabla bien formateada con los resultados
+
+m%>%
+  kable(escape=F, format="html") %>%
+  add_header_above(c("p-valor test chi-cuadrado \n Coeficiente de Cramér de variables factor"=3),
+                   color="black", bold=T, font_size=18) %>%
+  kable_styling("striped",
+                full_width=F,
+                position="center",
+                font_size=16)%>%
+  column_spec(1, bold=T) %>%
+  row_spec(0, bold=T, color="orange")
+
+```
+
+Con estos datos y resultados se puede decir que algunas variables, como gender y residence_type no muestran diferencias significativas (p-valor > 0.05) con padecer o no accidente cerebrovascular, lo que implica que, según esta base de datos, no están claramente asociadas con la enfermedad. El resto de variables sí muestran diferencias significativas (p-valor < 0.05) con padecer o no accidente cerebrovascular y una asociación moderada o fuerte con el accidente cerebrovascular (en función del valor del coeficiente de Cramér). Estas pueden considerarse factores importantes asociados con el accidente cerebrovascular en esta muestra.
+
+Hay que tener en cuenta que la desproporción de pacientes que no han tenido un infarto cerebral (n=4861) y los que han tenido infarto cerebral (n=249) puede tener un gran impacto en el test de chi-cuadrado y el coeficiente de Cramér, llevando a resultados que no son correctos en la realidad. Podría plantear ampliar la base de datos o utilizar el test exacto de Fisher para muestras desbalanceadas.
+
+Voy a realizar un test no paramétrico, el test de Wilcoxon, para ver si la diferencia de edad (age), el nivel de glucosa (avg_glucose_level) y el índice de masa corporal (bmi) entre lso pacientes con accidente cerebrovascular o no (stroke) es significativo o no.
+
+```{r}
+# Crea una matriz vacía para almacenar el p-valor del test de Wilcoxon variables numéricas
+
+mnum=matrix(nrow=3, 
+            ncol=1, #Una sala columna para almacenar el p-valor
+            dimnames=list(colnames(ACV_imp[,c(3, 9:10)]), #Nombre de la fila con la variable numérica ""age", "avg_glucose_level" y "bmi"
+                          c("p_valor"))) #Nombre de la columna
+
+# Aplicar el test de Wilcoxon para comparar la edad, glucosa e IMC entre pacientes con y sin accidente cerebrovascular
+
+for(i in c(3, 9:10)){ #Se selecciona las variables en la columna 4 (age), 10 (avg_glucose_level) y 11 (bmi)
+  varname = colnames(ACV_imp)[i]
+  f=formula(paste(colnames(ACV_imp)[i], "~stroke")) #Construir la fórmula  age~stroke
+  test=wilcox.test(f, data=ACV_imp) #Realizar test de Wilcoxon para comparar medianas
+  mnum[varname,1]=c(round(test$p.value, 4)) #Guardar el p-valor del test en la matriz
+}
+
+# Convertir la matriz en un dataframe para se visualización
+
+mnum=as.data.frame(mnum) %>%
+  mutate(p_valor=ifelse(as.numeric(p_valor)<0.05,
+                        cell_spec(p_valor, "html", bold=T), #Resaltar valores significativos en negrita
+                        p_valor))
+
+# Mostrar los resultados en una tabla bien formateada con kable()
+
+mnum %>%
+  kable(escape=F, format="html") %>%
+  add_header_above(c("Test Wilcoxon de variables numéricas"=2),
+                   color="black", bold=T, font_size=18) %>%
+  kable_styling("striped",
+                full_width = F,
+                position="center",
+                font_size=16) %>%
+  column_spec(1, bold=T) %>%
+  row_spec(0, bold=T, color="orange")
+```
+
+Como se puede observar en la tabla, la edad, los niveles promedios de glucosa y el índice de masa corporal son variables que muestran diferencias significativas (p-valor < 0.05), por tanto, son factores importantes asociados con el accidente cerebrovascular en esta muestra.
+
+**Matriz de correlación para variables numéricas**
+
+```{r}
+num_vars <- ACV_imp[, c("age", "avg_glucose_level", "bmi")]
+
+# Convertir a numéricas (por si acaso alguna está como carácter)
+
+num_vars <- data.frame(lapply(num_vars, as.numeric))
+
+# Calular la matriz de correlaciones
+
+cor_matrix <- cor(num_vars)
+
+# Guardar la figura como JPEG
+
+jpeg("figura4_matriz_correlacion.jpeg", width = 600, height = 450, quality = 100)
+
+# Crear el gráfico de correlación
+
+corrplot(
+  cor_matrix,
+  method = "color",        # Muestra los colores por intensidad
+  type = "lower",          # Solo la mitad inferior
+  addCoef.col = "black",   # Añade los coeficientes numéricos
+  tl.col = "black",        # Color del texto de etiquetas
+  tl.srt = 30,             # Rotar nombres de variables
+  number.cex = 0.9,        # Tamaño de los números
+  col = colorRampPalette(c("#56B1F7", "white", "#132B43"))(100),
+  title = "Matriz de correlación de variables numéricas",
+  mar = c(0,0,2,0)         # Márgenes más compactos
+)
+
+# Cerrar el dispositivo gráfico (muy importante)
+
+dev.off()
+```
+
+**Creación de un modelo predictivo del ACV**
+
+Creo un modelo predictivo, con los datos que he ido trabajando y voy a ver si soy capaz de predecir si un paciente tiene ACV o no. Se va a utilizar la variable stroke como variable que quiero predecir en función del resto. Se va a utilizar el 80% de los datos para entrenar el modelo y el 20% restante para testar el modelo teniendo en cuenta que se coge el 1% de datos relativos a pacientes sin ACV. Los datos se van a normalizar y escalar (tanto los de entrenamiento como los datos que he reservado para testar el modelo entrenado).
+
+Para ello, primero creo la receta con sobremuestreo y los proceso antes de realizar el análisis.
+
+```{r}
+# Crear receta con SMOTE
+
+rec <- recipe(stroke ~ ., data = ACV_imp) %>%
+  step_dummy(all_nominal_predictors()) %>%  # Convertir factores a variables dummies
+  step_smote(stroke) %>%                    # Sobremuestreo SMOTE
+  step_center(all_numeric_predictors()) %>% # Centrar variables
+  step_scale(all_numeric_predictors())      # Escalar variables
+
+# Preparar la receta
+
+rec_prep <- prep(rec)
+data_model <- bake(rec_prep, new_data = NULL)
+```
+
+Una vez preparado el sobremuestreo procedo a aplicar los distintos modelos predictivos:
+
+*Regresión Logística penalizada (LASSO)*
+
+```{r}
+# Crear matriz de predictores y respuesta
+
+x <- model.matrix(stroke ~ . - 1, data = data_model)
+y <- as.numeric(data_model$stroke == "Yes")
+
+# Ajustar modelo LASSO
+
+set.seed(123)
+lasso_fit <- cv.glmnet(x, y, 
+                       family = "binomial", 
+                       alpha = 1)
+
+# Ver el mejor valor de lambda
+
+lasso_fit$lambda.min
+```
+
+Una vez obtenido el mejor valor de lambda, este se utiliza para la validación cruzada e identifico las variables más representativas mediante los coeficicientes.
+
+```{r}
+# Extraer coeficientes significativos
+
+coef_lasso <- coef(lasso_fit, s = "lambda.min") %>%
+  as.matrix() %>%
+  as.data.frame()
+
+colnames(coef_lasso) <- "Coefficient"
+
+coef_lasso <- tibble::rownames_to_column(coef_lasso, "Variable") %>% # convierte los nombres de las filas en una columna llamada variable
+  filter(Coefficient != 0) %>% # pone 0 a los coeficientes de las variables irrelevantes/ elimina las varibles descartadas
+  mutate(Variable = str_replace(Variable, "_.*", "")) %>%  # agrupar prefijo
+  group_by(Variable) %>% # agrupa las variables
+  summarise(Coefficient = mean(Coefficient, na.rm = T)) %>%  # promedio de los coeficientes por grupo
+  ungroup() %>% # elimina la estructura de agrupación
+  arrange(desc(abs(Coefficient))) # ordena las variables según su coeficiente de mayor a menor
+
+coef_lasso
+
+coef_lasso <- coef_lasso[-5, ] 
+
+print(coef_lasso)
+```
+
+Los coeficientes diferentes de cero se identificaron como predictores significativos como son la edad, la hipertensión, el nivel medio de glucosa, la enfermedad cardíaca, el tipo de residencia y el género. Los coeficientes positivos indican una mayor probabilidad de sufrir ACV conforme aumenta el coeficiente o está presente la condición.
+
+Represento la trayectoria de los coeficientes del modelo LASSO
+
+```{r}
+par(mar = c(5, 5, 6, 2)) # ampliar margen superior
+
+plot(
+  lasso_fit,
+  xlab = expression(log(lambda)),
+  ylab = "Coeficientes",
+  main = "",
+  col = "steelblue",
+  lwd = 1.5
+)
+
+title(main = "Trayectoria de coeficientes del modelo LASSO", line = 4, cex.main = 1.3)
+box(lwd = 1.2)
+```
+
+A medida que la penalización se incrementa, los coeficientes de menor relevancia se reducen progresivamente a cero, permitiendo identificar las variables predictoras más robustas.
+
+*Modelo Random Forest*
+
+```{r}
+# Realizo el entrenamiento del modelo junto con la validación cruzada
+
+set.seed(123)
+rf_fit <- train(
+  stroke ~ ., 
+  data = data_model,
+  method = "rf", # método utilizado
+  trControl = trainControl(method = "cv", # validación cruzada
+                           number = 10, # 10 particiones o pliegues
+                           classProbs = T, # calcula la probabilidades de clase
+                           summaryFunction = twoClassSummary), # evalua con sensibilidad, especificidad y AUC
+  metric = "ROC"
+)
+```
+
+Visualizo la importancia de las variables
+
+```{r}
+# Ver importancia de variables
+
+var_imp_rf <- varImp(rf_fit, scale = T)
+print(var_imp_rf)
+```
+
+Ahora represento la importancia de las variables agrupadas.
+
+```{r}
+# Extraer importancia del modelo
+
+var_imp_df <- varImp(rf_fit)$importance %>%
+  rownames_to_column("Variable")
+
+# Agrupar dummies (por el prefijo antes del guion bajo "_")
+
+var_imp_grouped <- var_imp_df %>%
+  mutate(Variable = str_replace(Variable, "_.*", "")) %>%  # me quedo con el prefijo original
+  group_by(Variable) %>%
+  summarise(Importancia = mean(Overall)) %>% # calcula la media de la importancia de esa variable
+  arrange(desc(Importancia)) # ordena las variables de mayor a menor importancia
+
+var_imp_grouped
+```
+
+```{r}
+p<- ggplot(var_imp_grouped, 
+           aes(x = reorder(Variable, Importancia), y = Importancia)) + 
+  geom_col(fill = "#2C7BB6") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Importancia agrupada de variables (Random Forest)",
+    x = "Variable predictora",
+    y = "Importancia media"
+  )
+
+
+print(p)
+```
+
+Las variables más influyentes fueron la edad, la hipertensión, el estado civil, seguidas por el tipo de residencia, el nivel promedio de glucosa, el índice de masa corporal y el tabaquismo. En contraste, la enfermedad cardíaca, el tipo de trabajo y el género mostraron una contribución menor, indicando un papel secundario en la predicción del riesgo de ACV.
+
+*Comparación conjunto*
+
+```{r}
+# Combinar ambas tablas
+
+comparacion <- left_join(coef_lasso, var_imp_grouped, by = "Variable")
+
+# Mostrar resultado ordenado
+
+comparacion <- comparacion %>%
+  arrange(desc(Importancia))
+
+print(comparacion)
+```
+
+Ambos modelos coincidieron en identificar la edad, la hipertensión, el tipo de residencia y el nivel medio de glucosa como los predictores más importantes del ACV.
+
+```{r}
+# Comparación visual de importancia
+
+comparacion %>%
+  ggplot(aes(x = reorder(Variable, Importancia))) +
+  geom_bar(aes(y = Importancia), stat = "identity", fill = "#56B1F7", alpha = 0.8) +
+  geom_point(aes(y = abs(Coefficient) * 100), color = "red", size = 3) +
+  theme_minimal() +
+  coord_flip() +
+  labs(
+    title = "Comparación de importancia entre LASSO y Random Forest",
+    x = "Variable",
+    y = "Importancia (RF, azul) / |Coeficiente| (LASSO, rojo)"
+  )
+```
+
+**Evaluar el efecto del sobremuestreo**
+
+Para ver el efecto que produce el desequilibrio de clases en los modelos predictivos se comparan los modelos antes y después de aplicar el sobremuestreo.
+
+Primero creo un recipiente que no se aplique el sobremuestreo.
+
+```{r}
+# Sin SMOTE
+
+rec_no_smote <- recipe(stroke ~ ., data = ACV_imp) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+
+rec_no_smote_prep <- prep(rec_no_smote)
+data_no_smote <- bake(rec_no_smote_prep, new_data = NULL)
+
+set.seed(123)
+ctrl <- trainControl(
+  method= "cv",
+  number= 10,
+  classProbs = T,
+  summaryFunction = twoClassSummary
+)
+```
+
+Genero los modelos sin sobremuestreo.
+
+```{r}
+# Modelo LASSO sin SMOTE
+
+lasso_no<- train(
+  stroke~., data= data_no_smote,
+  method= "glmnet",
+  trControl= ctrl,
+  metric= "ROC"
+)
+
+# Random Forest sin SMOTE
+
+rf_no<- train(
+  stroke~., data= data_no_smote,
+  method= "rf",
+  trControl= ctrl,
+  metric= "ROC"
+)
+```
+
+Creo también el modelo LASSO con SMOTE, ya que al aplicar el siguiente paso si utilizo *lasso_fit* el máximo que me devuelve es -Inf.
+
+```{r}
+# Modelo LASSO con SMOTE
+
+lasso_smote<- train(
+  stroke~., data= data_model,
+  method= "glmnet",
+  trControl= ctrl,
+  metric= "ROC"
+)
+```
+
+Evaluo y comparo ambos modelos
+
+```{r}
+ Obtener los resultados de cada modelo
+
+resumen <- tibble(
+  Modelo= c("LASSO sin SMOTE", "LASSO con SMOTE", "RF sin SMOTE", "RF con SMOTE"),
+  AUC= c(max(lasso_no$results$ROC),
+         max(lasso_smote$results$ROC),
+         max(rf_no$results$ROC),
+         max(rf_fit$results$ROC)),
+  Sensibilidad= c(max(lasso_no$results$Sens),
+                  max(lasso_smote$results$Sens),
+                  max(rf_no$results$Sens),
+                  max(rf_fit$results$Sens)),
+  Especificidad= c(max(lasso_no$results$Spec),
+                   max(lasso_smote$results$Spec),
+                   max(rf_no$results$Spec),
+                   max(rf_fit$results$Spec))
+)
+
+print(resumen)
+
+```
+
+*Curvas ROC*
+
+Realizo las curvas ROC para ambos modelos antes y después del sobremuestreo.
+
+```{r}
+# LASSO
+
+roc_no <- roc(data_no_smote$stroke, predict(lasso_no, data_no_smote, type = "prob")[, "Yes"])
+roc_smote <- roc(data_model$stroke, predict(lasso_smote, data_model, type = "prob")[, "Yes"])
+
+plot(roc_no, col = "#4B9CD3", 
+     main = "Efecto del SMOTE en el modelo LASSO", 
+     lwd = 2, 
+     cex.main = 1.3,
+     cex.axis = 1, 
+     cex.lab = 1.1)
+lines(roc_smote, col = "#E69F00", lwd = 2)
+legend("topright", legend = c("Sin SMOTE", "Con SMOTE"),
+       col = c("#4B9CD3", "#E69F00"),
+       lwd = 2, cex = 0.8,
+       bty = "n", inset = c(0, 0.02),
+       title = "Modelo")
+
+```
+
+El modelo LASSO sin SMOTE presenta una capacidad de discriminación aceptable, clasifica todos los casos de ACV como positivo, pero también clasifica a todos los controles como positivos dando muchos falsos positivos, por tanto, este modelo prioriza en exceso la detección de la clase minoritaria a costa de una pérdida total de precisión en la clase mayoritaria. Por otro lado, el modelo LASSO con SMOTE presenta una capacidad de discriminación ligeramente superior que el anterior modelo y presenta un equilibrio más adecuado entre la sensibilidad y la especificidad, logrando una predicción más robusta y clínicamente más coherente.
+
+```{r}
+# Random Forest
+
+roc_no <- roc(data_no_smote$stroke, predict(rf_no, data_no_smote, type = "prob")[, "Yes"])
+roc_smote <- roc(data_model$stroke, predict(rf_smote, data_model, type = "prob")[, "Yes"])
+
+plot(roc_no, col = "#4B9CD3", main = "Efecto del SMOTE en el modelo Random Forest", 
+     lwd = 2, 
+     cex.main = 1.3,
+     cex.axis = 1, 
+     cex.lab = 1.1)
+lines(roc_smote, col = "#E69F00", lwd = 2)
+legend("topright", legend = c("Sin SMOTE", "Con SMOTE"),
+       col = c("#4B9CD3", "#E69F00"),  lwd = 2, cex = 0.8,
+       bty = "n", inset = c(0, 0.02),
+       title = "Modelo")
+
+```
+
+El modelo Random Forest sin SMOTE presenta una capacidad de discriminación ligeramente inferior al modelo LASSO sin SMOTE y al igual que este clasifica casi todo como ACV, por lo que, también sobredetecta la clase minoritaria, mostrando el mismo sesgo que LASSO. Por último, el modelo Random Forest con SMOTE presenta un rendimiento casi perfecto, indicando que el sobremuestreo mejoró enormemente la detección de casos positivos como la correcta clasificación de los negativos.
+
+**Comparación de los coeficientes/ importancias**
+
+Se comparan los coeficientes obtenidos en el modelo LASSO antes y después de la aplicación de la técnica de SMOTE, para ver como influye el sobremuestreo en la predicción de las variables que influyen en el ACV.
+
+```{r}
+# Extraer coeficientes LASSO en el lambda óptimo y preparar dataframe
+
+get_lasso_coefs <- function(fit, etiqueta_modelo){
+  lam <- fit$bestTune$lambda
+  b <- coef(fit$finalModel, s = lam)                       # matriz dispersa
+  df <- as.data.frame(as.matrix(b))
+  colnames(df) <- "Coef"
+  df %>%
+    rownames_to_column("Variable") %>%
+    filter(Variable != "(Intercept)") %>%                  # quitar intercepto
+    mutate(
+      Coef   = as.numeric(Coef),
+      Modelo = etiqueta_modelo
+    )
+}
+
+coef_no    <- get_lasso_coefs(lasso_no, "Sin SMOTE")
+coef_smote <- get_lasso_coefs(lasso_smote, "Con SMOTE")
+coef_all   <- bind_rows(coef_no, coef_smote)
+
+# Construir patrón de variables categóricas (prefijos) desde el dataset original
+
+factor_vars <- names(ACV_imp)[sapply(ACV_imp, is.factor)]
+factor_vars <- setdiff(factor_vars, "stroke")              # excluir respuesta
+pat <- paste0("^(", paste(factor_vars, collapse = "|"), ")_")  # ^(var1|var2|...|varK)_
+
+# Colapsar dummies a su variable base y agregar
+
+coef_grouped <- coef_all %>%
+  mutate(
+    Variable_base = if_else(
+      str_detect(Variable, pat),
+      str_extract(Variable, pat) %>% str_replace("_$", ""),
+      Variable                                        # numéricas: quedan igual
+    )
+  ) %>%
+  group_by(Variable_base, Modelo) %>%
+  summarise(
+    Importancia = sum(abs(Coef), na.rm = TRUE),       # alternativa: mean(abs(Coef))
+    .groups = "drop"
+  ) %>%
+  filter(Importancia > 0)                             # quitar grupos nulos, si los hubiera
+
+# Orden estable (por media entre modelos)
+orden_vars <- coef_grouped %>%
+  group_by(Variable_base) %>%
+  summarise(Imp_media = mean(Importancia), .groups = "drop") %>%
+  arrange(Imp_media) %>%
+  pull(Variable_base)
+
+coef_grouped <- coef_grouped %>%
+  mutate(Variable_base = factor(Variable_base, levels = orden_vars))
+
+# Gráfica comparativa
+
+ggplot(coef_grouped, aes(x = Variable_base, y = Importancia, fill = Modelo)) +
+  geom_col(position = position_dodge(width = 0.75)) +
+  coord_flip() +
+  scale_fill_manual(values = c("#4B9CD3", "#E69F00")) +
+  theme_minimal() +
+  labs(
+    title = "Cambio en la importancia de variables tras aplicar SMOTE (LASSO)",
+    subtitle = "Suma de |coeficientes| por variable base",
+    x = "Variable (agrupada)",
+    y = "|Coeficiente| agregado",
+    fill = "Modelo"
+  )
+```
+
+Como se puede observar en el modelo LASSO sin SMOTE, los resultados mostraron una fuerte influencia en la edad, en el nivel promedio de glucosa, en la hipertensión y en la presencia de enfermedades cardiacas, mientras que en el resto de variables presentaron coeficientes nulos. La edad destacó como el principal predictor, reflejando su fuerte asociación con la probabilidad de sufrir un ACV. Este modelo presenta un patrón restrictivo ya que muy pocas variables presentaron coeficientes distintos de cero, esto se debe a que el conjunto de datos está desequilibrado y hay una escasez de casos positivos limitando la capacidad del modelo para identificar relaciones complejas.
+Tras aplicar SMOTE, se observó que la edad mantiene su posición como el principal predictor, incrementando su magnitud absoluta, lo que refuerza su influencia sobre la predicción del ACV. Además, las variables como la hipertensión, el tipo de trabajo y el nivel medio de glucosa adquirieron una mayor relevancia en el modelo, lo que refleja una mejoría de la capacidad del algoritmo para reconocer patrones característicos de la clase minoritaria. En el segundo nivel de importancia se encuentran el tabaquismo, la enfermedad cardíaca, el tipo de residencia, el IMC y el género, que, aunque en menor medida, contribuyen a la calibración del modelo y a la reducción del error de clasificación.
+
+Se comparan las importancia obtenidos en el modelo Random Forest antes y después de la aplicación de la técnica de SMOTE, para ver como influye el sobremuestreo en la predicción de las variables que influyen en el ACV.
+
+```{r}
+imp_no <- varImp(rf_no)$importance %>%
+  rownames_to_column("Variable") %>%
+  mutate(Modelo = "Sin SMOTE")
+
+imp_smote <- varImp(rf_fit)$importance %>%
+  rownames_to_column("Variable") %>%
+  mutate(Modelo = "Con SMOTE")
+
+imp_comparado <- bind_rows(imp_no, imp_smote)
+
+# Detectar las varaibles categóricas en el dataset original
+
+factor_vars <- names(ACV_imp)[sapply(ACV_imp, is.factor)]
+factor_vars <- setdiff(factor_vars, "stroke") # excluir la respuesta
+
+#Construir patrón: ^(var1|var2|var3)_
+
+pat <- paste0("^(", paste(factor_vars, collapse = "|"), ")_")
+
+# Colapsar dummies a su variable base SOLO si empiezan por alguna factor_var + "_"
+imp_grouped <- imp_comparado %>%
+  mutate(Variable_base = if_else(
+    str_detect(Variable, pat),
+    str_extract(Variable, pat) %>% str_replace("_$", ""),  # extrae el prefijo sin el "_"
+    Variable  # deja tal cual las numéricas (age, avg_glucose_level, bmi, ...)
+  )) %>%
+  group_by(Variable_base, Modelo) %>%
+  summarise(Importancia = mean(Overall, na.rm = TRUE), .groups = "drop")  # usa mean o sum
+
+# Ordenar por importancia promedio entre modelos para un orden estable
+orden_vars <- imp_grouped %>%
+  group_by(Variable_base) %>%
+  summarise(Imp_media = mean(Importancia, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Imp_media) %>%
+  pull(Variable_base)
+
+imp_grouped <- imp_grouped %>%
+  mutate(Variable_base = factor(Variable_base, levels = orden_vars))
+
+# Gráfico comparativo agrupado (sin subniveles)
+ggplot(imp_grouped, aes(x = Variable_base, y = Importancia, fill = Modelo)) +
+  geom_col(position = position_dodge(width = 0.75)) +
+  coord_flip() +
+  scale_fill_manual(values = c("#4B9CD3", "#E69F00")) +
+  theme_minimal() +
+  labs(
+    title = "Cambio en la importancia de variables tras aplicar SMOTE (Random Forest)",
+    x = "Variable (agrupada)",
+    y = "Importancia (media por variable base)",
+    fill = "Modelo"
+  )
+```
+
+Como se puede observar en el modelo entrenado sin sobremuestreo, las variables con mayor relevancia fueron de carácter poblacional o metabólico general como el nivel medio de glucosa, el IMC y la edad, seguida del tipo de residencia y la hipertensión. Esto es debido a que en el conjunto de datos entrenados la gran mayoría de los registros pertenecen a pacientes sin accidente cerebrovascular.
+Tras aplicar el sobremuestreo SMOTE, se observó un cambio sustancial en la estructura de importancias dando mayor peso a los factores clínicos, como la edad y la hipertensión, y a algunos indicadores sociodemográficos (estado civil y tipo de residencia), mientras que la importancia del nivel medio de glucosa disminuye considerablemente. Este cambio con respecto al modelo sin SMOTE se debe a la corrección del desequilibrio de clases, ya que el modelo Random Forest da mayor peso a los factores clínicamente más relevantes para el riesgo de accidente cerebrovascular, mejorando la interpretabilidad y coherencia de los resultados.
+
+Si se comparan los resultados del modelo LASSO con los obtenidos en el Random Forest, se observa una estabilidad en la identificación de las variables más relevantes. En ambos casos, la edad y la hipertensión se robustecen como factores principales, mientras que el nivel medio de glucosa y el tabaquismo ocupan posiciones secundarias. Sin embargo, el modelo LASSO aporta una interpretación más directa ya que la magnitud y el signo de los coeficientes reflejan de manera explícita la dirección y el peso del efecto de cada variable sobre la probabilidad de sufrir un ACV. Por otro lado, el modelo Random Forest, proporciona una medida de importancia más global y menos interpretable en términos clínicos pero útil para validar la consistencia de los patrones detectados.
+
+
+
+
+
+
+
+
+
+
+
+
